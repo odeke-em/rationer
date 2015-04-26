@@ -1,4 +1,4 @@
-package schedSlicer
+package rationer
 
 import (
 	"fmt"
