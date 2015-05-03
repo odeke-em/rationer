@@ -37,7 +37,7 @@ func NewRationer(capacity uint64) *Rationer {
 func (r *Rationer) readyTick() {
 	var mu sync.Mutex
 
-	tick := time.Tick(1e9)
+	tick := time.Tick(1e9 / 10)
 	for !r.finished {
 		mu.Lock()
 		if len(r.dibbs) < cap(r.dibbs) {
