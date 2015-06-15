@@ -23,7 +23,7 @@ func ranger(n int) Job {
 }
 
 func TestRationer(t *testing.T) {
-	capacity := uint64(10)
+	capacity := uint64(100)
 
 	rationer := NewRationer(capacity)
 
@@ -37,6 +37,12 @@ func TestRationer(t *testing.T) {
 		fmt.Println("\033[92m# i ", i, "\033[00m")
 		loader <- ranger(10)
 	}
+
+	go func(res chan interface{}) {
+		for r := range res {
+			fmt.Println("r", r)
+		}
+	}(rationer.Results())
 
 	loader <- Sentinel
 	rationer.Wait()

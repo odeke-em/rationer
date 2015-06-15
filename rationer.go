@@ -1,97 +1,74 @@
 package rationer
 
-import (
-	"sync"
-	"time"
-)
-
 var Sentinel = "sentinel"
 
 type Job func() interface{}
 
 type Rationer struct {
-	finished bool
-	dibbs    chan interface{}
-	results  chan interface{}
-	ready    chan bool
-	done     chan bool
+	done          chan bool
+	finished      bool
+	results       chan interface{}
+	tokenCapacity uint64
 }
 
 func NewRationer(capacity uint64) *Rationer {
-	ready := make(chan bool)
-	dibbs := make(chan interface{}, capacity)
 	results := make(chan interface{})
 	done := make(chan bool, 1)
 
 	r := Rationer{
-		dibbs:    dibbs,
-		ready:    ready,
-		done:     done,
-		results:  results,
-		finished: false,
+		tokenCapacity: capacity,
+		done:          done,
+		results:       results,
+		finished:      false,
 	}
 
 	return &r
-}
-
-func (r *Rationer) readyTick() {
-	var mu sync.Mutex
-
-	tick := time.Tick(1e9 / 10)
-	for !r.finished {
-		mu.Lock()
-		if len(r.dibbs) < cap(r.dibbs) {
-			r.ready <- true
-		}
-		mu.Unlock()
-		<-tick
-	}
 }
 
 func (r *Rationer) Run() chan interface{} {
 	loader := make(chan interface{})
 
 	go func() {
-		// Spin while waiting till ready
-		spinning := true
-		for spinning {
-			select {
-			case <-r.ready:
-				for head := range loader {
-					if head == Sentinel { // Cancellation requested
-						spinning = false
-						break
-					}
+		doneChan := make(chan bool)
+		doneCount := uint64(0)
 
-					job, ok := head.(Job)
-					if !ok {
-						continue
-					}
+		tokens := make(chan bool, r.tokenCapacity)
 
-					go func() {
-						r.dibbs <- true
-						result := job()
+		// Load them up
+		for i := uint64(0); i < r.tokenCapacity; i += 1 {
+			tokens <- true
+		}
 
-						mu := sync.Mutex{}
-						mu.Lock()
-						if len(r.dibbs) >= 1 {
-							<-r.dibbs
-						}
-						mu.Unlock()
+		for {
+			head, hasContent := <-loader
 
-						r.results <- result
-					}()
-
-					break
-				}
-			default:
+			if !hasContent || head == Sentinel { // Cancellation requested or chan closed
+				break
 			}
+
+			job, ok := head.(Job)
+			if !ok {
+				continue
+			}
+
+			<-tokens
+			doneCount += 1
+
+			go func(results chan interface{}) {
+				results <- job()
+
+				tokens <- true
+				doneChan <- true
+
+			}(r.results)
+		}
+
+		for i := uint64(0); i < doneCount; i += 1 {
+			<-doneChan
 		}
 
 		r.done <- true
 	}()
-
-	go r.readyTick()
 
 	return loader
 }
